@@ -1,0 +1,43 @@
+EXTERN_ENV
+
+#include <stdio.h>
+#include <stdlib.h>
+
+#include "trap.h"
+#include "limits.h"
+
+
+/* Global definitions in this file */
+
+int *slaves_left = (int *)0x800;
+
+
+
+void CMexit(int n){
+  exit(n);
+}
+
+void resume_proc(int n){
+  trap(TRAP_RESUME_PROC, n);
+}
+
+void stop_proc(int n){
+  trap(TRAP_STOP_PROC, n);
+}
+
+unsigned long get_time(){
+  return trap(TRAP_GET_TIME);
+}
+
+void ANL_start_p(int n, void f()) {
+  int pid;
+  WHO_AM_I(&pid);
+#ifdef DEBUG
+  printf("Proc %d calls ANL_start_p, Slaves left: %d\n", pid, *slaves_left);
+#endif
+  *slaves_left++;
+  trap(TRAP_START_PROC, n, f);
+}
+
+
+

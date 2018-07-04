@@ -1,0 +1,394 @@
+
+ 
+define(ENDLAB,5283) dnl
+
+define(PROC_ID,`int')
+
+/*  delay(<monitor>,<queue>,<index>)
+*/
+define(DELAY,`{
+	$1[$3].count[$2]++;
+        XXUNLOCK($1[$3].lock)   
+        cm_lock(&($1[$3].queue[$2]));
+}')
+
+/*  continue(<monitor>,<queue>,<index>)
+*/
+define(CONTINUE,`{
+	if ($1[$3].count[$2] == 0)
+            {
+                XXUNLOCK($1[$3].lock)
+            }
+            else
+            {
+                ($1[$3].count[$2])--;
+               cm_unlock(&($1[$3].queue[$2]));
+            }
+            goto `L'ENDLAB;
+}')
+
+/*  menter(<monitor>,<index>)
+*/
+define(MENTER,
+      `{
+           XXLOCK(($1[$2].lock))
+       }'
+      )
+
+/*  mexit(<monitor>,<index>)
+*/
+define(MEXIT,`{
+	    XXUNLOCK($1[$2].lock)
+           `L'ENDLAB: ;
+            define(`ENDLAB',eval(ENDLAB+1))
+}')
+
+/*  decvar(<monitor>,<queues>,<index>,<extra_code_for_more_variables>)
+*/
+define(DECVAR,
+           `volatile struct $1TYP {      
+               XXDECLOCK(lock)
+               ifelse(eval($2 > 0),1,volatile int count[$2];,)
+               ifelse(eval($2 > 0),1, int queue[$2];,)
+               $4
+           } $1[$3];'
+       )
+
+/*  moninit(<monitor>,<queues>,<index>)
+*/
+define(MONINIT, `{
+         int q_num;
+	 int i;
+
+         for (i = 0; i < ifelse($3,,1,$3); i++){         
+             ifelse(eval($2 > 0),1,
+	         for (q_num=0; q_num < $2; q_num++)
+	         {
+		     $1[i].count[q_num] = 0;
+
+		     $1[i].queue[q_num] = 0;
+		     cm_lock(&($1[i].queue[q_num]));
+	         },,)
+	         XXLOCKINIT($1[i].lock)
+             }
+	}
+')
+	  
+    
+/*  create(<procedure>)
+*/
+define(CREATE,`{
+
+    ANLglob->slave_func = $1;   
+
+    if (ANLglob->proc_started++ < MAX_PROCS) {
+	ANLglob->max_proc = ANLglob->proc_started;
+	start_p(ANLglob->proc_started, ZZZ_slave);
+    } else
+	printf("Attempt to create more processors than allowed max %d\n", MAX_PROCS);
+}
+')
+
+define(CREATE_R,`{
+
+    ANLglob->slave_func = $1;   
+
+    if (ANLglob->proc_started++ < MAX_PROCS) {
+	ANLglob->max_proc = ANLglob->proc_started;
+	start_p(ANLglob->proc_started, ZZZ_slave);
+        trap(TRAP_REPLICATE, ANLglob->proc_started);
+    } else
+	printf("Attempt to create more processors than allowed max %d\n", MAX_PROCS);
+}
+')
+
+/* clock(<clock_val>)
+*/
+define(CLOCK,`$1 = trap(TRAP_GET_TIME) / 100000;')
+
+
+/* main_end()
+*/
+define(MAIN_END,`
+	exit(0);
+')
+
+
+/* main_env(<max_procs>,<sh_mem>,<sr_buffs>)) */
+define(MAIN_ENV,`
+
+    XXENV($1,$2,$3)
+
+
+    int ANLno_procs;
+    int proc_id;
+
+    volatile ANLglobTYPE *ANLglob;
+  
+    ZZZ_slave(){
+        int pid;
+        WHO_AM_I(&pid);
+	for (;;){
+	  (*(ANLglob->slave_func))();
+
+	  cm_lock(&(ANLglob->end_lock));
+	  ANLglob->proc_started--;
+	  cm_unlock(&(ANLglob->end_lock));
+
+	  CMexit(0);
+	}
+
+    }
+
+
+')
+
+/* extern_env */
+define(EXTERN_ENV,`
+
+    XXENV
+
+')
+
+
+/* extern_INITENV */
+define(EXTERN_INITENV,`
+
+    XXINITENV
+
+')
+
+
+/* main_INITENV(<max_processors>,<global_memory>,<max_locks>)
+
+*/
+define(MAIN_INITENV,`{
+    WHO_AM_I(&proc_id);
+
+    if(proc_id == 0){
+        ifelse($2,,,`define(`SH_MEM',$2)')
+
+      define(`MAX_PROCS',`ifelse($1,,32,$1)')
+
+      ANLno_procs = trap(GET_NOPROCS);
+
+      XXINITENV
+
+      xx_mem(0, SH_MEM);
+
+      ANLglob = (ANLglobTYPE *)G_MALLOC(sizeof(ANLglobTYPE));
+      ANLglob->end_lock = 0;
+      ANLglob->max_proc = 0;
+      ANLglob->proc_started = 0;
+
+    } else {
+	ZZZ_slave();
+
+    }
+}')
+
+/* initenv(<global_memory>)
+
+*/
+define(INITENV,`MAIN_INITENV(,$1)')
+
+
+/* who_am_i(<proc_id>) */
+define(WHO_AM_I,`
+   *$1 = getpid();
+')
+
+
+/* char *g_malloc(<size>)
+*/
+define(G_MALLOC,
+	 `xx_mem(1,$1);'
+      )
+
+define(WAIT_FOR_END,`
+       { 
+	 int i; 
+	 for (i = 1; i <= $1; i++) 
+	   wait (0); 
+	 trap(END_STAT);
+       }')
+
+
+
+define(XXENV,`
+#include "shmem.h"
+#include "stdio.h"
+#include "stdlib.h"
+#include "trap.h"
+
+#define PAGE_SIZE		4096
+
+typedef struct _ANLglobTYPE {
+      volatile int end_lock;
+      volatile int max_proc;
+      volatile int proc_started;
+      void (*slave_func)(); 
+      } ANLglobTYPE;
+
+    define(`MAX_PROCS',`ifelse($1,,32,$1)')
+    define(`SH_MEM',`ifelse($2,,1500000,$2)')  
+    define(`SR_BUFFS',`ifelse($3,,600,$3)')
+
+enum error_type {OUT_OF_SHARED_MEMORY, 
+			OUT_OF_HEAP_MEMORY, OUT_OF_RANGE};
+
+
+typedef   struct _ANL_lock {
+    int flags[MAX_PROCS*16];
+    int myplace[MAX_PROCS*16];
+    int last;    
+    int ll;
+  } ANL_lock;
+
+extern void mdlx_error();
+extern char *xx_mem();
+extern volatile ANLglobTYPE *ANLglob;
+
+inline static PS(char *s) {
+  trap(TRAP_PRINT_STRING, s, strlen(s));
+}
+
+inline static PI(int i) {
+  trap(TRAP_PRINT_INT, i);
+}
+
+	 ')
+
+define(XXINITENV,`
+#ifndef HAS_LOCK
+#define HAS_LOCK  0 
+#define MUST_WAIT -1
+#endif
+    ')
+
+define(XXDECLOCK,`
+ ANL_lock $1;
+')
+
+define(XXLOCKINIT,`
+{
+  int ANLi;
+
+    $1.last = 0;
+    $1.ll = 0;
+    $1.flags[0] = HAS_LOCK;
+    for (ANLi = 1; ANLi < MAX_PROCS; ANLi++) {
+	$1.flags[ANLi<<4] = MUST_WAIT;
+    }
+
+}
+')
+
+define(XXLOCK,`
+{
+    int myplace;
+    trap(ENTER_ACQUIRE, &($1));
+
+    cm_lock(&($1.ll));
+    myplace = $1.last;
+    $1.last++;
+    if ($1.last >= ANLno_procs) 
+	$1.last = 0;
+    $1.myplace[getpid()<<4] = myplace;
+    cm_unlock(&($1.ll));
+
+#if 0
+    while ($1.flags[myplace<<4] == MUST_WAIT) ;
+    $1.flags[myplace<<4] = MUST_WAIT;
+#else
+    cm_lock(&($1.flags[myplace<<4]));
+#endif
+    
+    trap(EXIT_ACQUIRE, &($1));
+}
+')
+
+
+define(XXUNLOCK,`
+{
+    int myplace;
+
+    trap(ENTER_RELEASE, &($1));
+
+    cm_lock(&($1.ll));
+    myplace = $1.myplace[getpid()<<4] + 1;
+    cm_unlock(&($1.ll));
+    if (myplace >= ANLno_procs)
+	myplace = 0;
+
+#if 0
+    $1.flags[myplace<<4] = HAS_LOCK;
+#else
+    cm_unlock(&($1.flags[myplace<<4]));
+#endif
+
+}
+')
+
+
+
+/*
+ * macros to support tracing the synchronization behavior of programs
+ * written with the Argonne c.st.monmacs and c.st.smacs.  There is a
+ * separate trace output file for each thread.  
+ */
+
+define(tRACE_VERBOSE, `1')
+define(sT_DEBUG, `1')
+ifdef(`tRACING_REFS', `1')
+
+/* constant for data structure sizes in synchronization trace */
+/* may be overridden in mAIN_INITENV */
+define(DEFAULT_MAX_LOCKS, `20000')
+
+/* ids for types of locks */
+define(ST_MUTEX, `1000')
+define(ST_BAR_LOCK, `2100')
+define(ST_BAR_QUEUE, `2200')
+define(ST_GS_LOCK, `3100')
+define(ST_GS_QUEUE, `3200')
+define(ST_MUTEX_ARRAY, `4000')
+
+/* trace vars associated with each lock */
+define(ST_LOCKVARS,` ')
+
+define(ST_INFO_INIT, 
+  `{
+  ifdef(`TRACE_VERBOSE', `{
+    printf("ST_INFO: name: %s, addr: 0x%x, type: %u\n", "$1", $3, $2);
+    fflush(stdout);
+    }')
+  }'
+)
+
+/* st_log(<operation> <lock address>)
+   logs event with time stamp into threads event log buffer.
+   event = op addr time.  can use s_TRACE_LOG_ENTRY and s_TRACE_LOG_EXIT now.
+*/
+define(ST_LOG, 
+`{
+  ifdef(`TRACE_VERBOSE', `{
+    int pid;
+    WHO_AM_I(&pid);
+    printf("pid: %d, st_log($1, 0x%x) at %u\n", pid, $2, get_time());
+    fflush(stdout);
+    }')
+  }'
+)
+
+
+
+define(START_GATHER_STAT,`
+   trap(START_STAT);
+')
+
+define(FINISH_GATHER_STAT,`
+   trap(END_STAT);
+')
+
+

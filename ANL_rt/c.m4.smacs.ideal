@@ -1,0 +1,270 @@
+/* BARRIER(<monitor>,<nprocs>)
+*/
+define(BARRIER,`{
+  barrier($2);
+}')
+
+/* BARDEC(<monitor>)
+*/
+define(BARDEC,
+          `DECVAR($1,1,1)'
+      )
+
+/* BARINIT(<monitor>)
+*/
+define(BARINIT,`{
+  MONINIT($1,1,1)
+  ST_INFO_INIT($1, ST_BAR_LOCK, &($1[0].lock) )
+  ST_INFO_INIT($1, ST_BAR_QUEUE, &($1[0].queue[0]) )
+  ST_LOG(ST_BAR_INIT, (int *)&($1[0].lock))
+  }')
+
+define(GSSPEC,
+          `int sub;      /* subscript stored in monitor */'
+      )
+
+/* GSDEC(<monitor>)
+*/
+define(GSDEC,
+         `DECVAR($1,1,1,GSSPEC)'
+      )
+
+/* GSINIT(<monitor>)
+*/
+define(GSINIT,`{
+	  MONINIT($1,1,1)
+          $1[0].sub = 0;
+}')
+
+/* GETSUB($1<monitor>,$2<subscript>,$3<max_sub>,$4<nprocs>,$5<chunk>)
+*/
+define(GETSUB,`{
+	  MENTER($1,0)
+          if ($1[0].sub <= $3)
+          {
+              $2 = $1[0].sub;
+	      $1[0].sub += ifelse($5,,1,$5);
+          }
+          else
+          {
+              $2 = -1;
+              if ($1[0].count[0] < ($4 - 1))
+              {
+                  DELAY($1,0,0)
+              }
+              else
+                  $1[0].sub = 0;
+              CONTINUE($1,0,0)
+          }
+          MEXIT($1,0)
+}')
+
+
+
+/* nlockdec(<monitor>)
+*/
+define(LOCKDEC,
+          `DECVAR($1,0,1)'
+      )
+
+/* nlockinit(<monitor>)
+*/
+define(LOCKINIT,`{
+  MONINIT($1,0,1)
+  ST_INFO_INIT($1, ST_MUTEX, &($1[0].lock) )
+  ST_LOG(ST_LOCK_INIT, (int *)&($1[0].lock))
+  }')
+
+/* nlock(<monitor>)
+*/
+define(LOCK,`{
+  register int *lockAddr;
+
+  lockAddr = (int *)&($1[0].lock);
+  ST_LOG(ST_LOCK_ENTER, lockAddr )
+  MENTER($1,0)
+  }')
+
+/* nunlock(<monitor>)
+*/
+define(UNLOCK, `{
+  register int *lockAddr;
+
+  lockAddr = (int *)&($1[0].lock);
+  ST_LOG(ST_UNLOCK, lockAddr )
+  MEXIT($1,0)
+  }')
+
+define(ALOCKDEC,
+          `DECVAR($1,0,$2)'
+      )
+
+define(ALOCKINIT,`{
+  int smacs_dum1;
+  for (smacs_dum1=0; smacs_dum1 < $2; smacs_dum1++) {
+    ST_INFO_INIT($1, ST_MUTEX_ARRAY, &($1[smacs_dum1].lock) )
+    ST_LOG(ST_LOCK_INIT, (int *)&($1[smacs_dum1].lock))
+  }
+  MONINIT($1,0,$2)
+  }')
+
+define(ALOCK,`{
+  register int *lockAddr;
+
+  lockAddr = (int *)&($1[$2].lock) ;
+  ST_LOG(ST_ALOCK_ENTER, lockAddr )
+  MENTER($1,$2)
+  ST_LOG(ST_ALOCK_EXIT, lockAddr )
+  '})
+
+define(AULOCK,`{
+  register int *lockAddr;
+
+  lockAddr = (int *)&($1[$2].lock);
+  ST_LOG(ST_AULOCK, lockAddr )
+  MEXIT($1,$2)
+  }')
+
+
+define(ASPEC, `
+          int pgdone;
+          int pbdone;
+')
+
+define(ADEC, `DECVAR($1,1,1,ASPEC)')
+
+define(AINIT, `{
+           MONINIT($1,1,1)
+           $1[0].pgdone = $1[0].pbdone = 0;
+}')
+
+define(ASKFOR, `{
+	   MENTER($1,0)
+           if (($1[0].pgdone == 0) && ($1[0].pbdone != 0))
+           {
+               if ($1[0].count[0] < ($3 - 1))
+               {
+                   DELAY($1,0,0)
+               }
+           }
+           else
+           {
+               $2 = -2;
+               while (($1[0].pgdone == 0) && ($1[0].pbdone == 0))
+               {
+                   $4
+                   if ($2 == 0)
+                   {
+                       CONTINUE($1,0,0)
+                   }
+                   else
+                   {
+                       if ($1[0].count[0] == ($3 - 1))
+                       {
+                           $1[0].pbdone = 1;
+                       }
+                       else
+                       {
+                           DELAY($1,0,0)
+                       }
+                   }
+               }
+           }
+           if ($1[0].pgdone != 0)
+           {
+               $2 = -1;
+               CONTINUE($1,0,0)
+           }
+           else
+           {
+               $2 = $1[0].pbdone;
+               if ($1[0].count[0] == 0)
+               {
+                   $5
+                   $1[0].pbdone = 0;
+               }
+               CONTINUE($1,0,0)
+           }
+           MEXIT($1,0)
+}')
+
+define(PROBEND, `{
+           MENTER($1,0)
+           $1[0].pbdone = $2;
+           MEXIT($1,0)
+}')
+
+define(PROGEND, `{
+           MENTER($1,0)
+           $1[0].pgdone = 1;
+	   MAIN_END
+           CONTINUE($1,0,0)
+           MEXIT($1,0)
+}')
+
+define(PAUSEDEC, `DECVAR($1,2,ifelse($2,,1,$2),int flag;)')
+
+define(PAUSEINIT,
+`{
+  int p_dummy;
+
+  for (p_dummy = 0; (p_dummy < ifelse($2,,1,$2)); p_dummy++)
+    $1[p_dummy].flag = 0;
+  MONINIT($1,2,ifelse($2,,1,$2))
+}')
+
+define(CLEARPAUSE,
+`{
+  register int *lockAddr;
+
+  lockAddr = (int *)&($1[ifelse($2,,0,$2)].lock);
+  ST_LOG(ST_EVENT_ENTER, lockAddr )
+  MENTER($1,ifelse($2,,0,$2))
+  $1[ifelse($2,,0,$2)].flag = 0;
+  CONTINUE($1,0,ifelse($2,,0,$2))
+  MEXIT($1,ifelse($2,,0,$2))
+  ST_LOG(ST_EVENT_EXIT, lockAddr)
+}')
+
+define(SETPAUSE,
+`{
+  register int *lockAddr;
+
+  lockAddr = (int *)&($1[ifelse($2,,0,$2)].lock);
+  ST_LOG(ST_EVENT_ENTER, lockAddr )
+  MENTER($1,ifelse($2,,0,$2))
+  $1[ifelse($2,,0,$2)].flag = 1;
+  CONTINUE($1,0,ifelse($2,,0,$2))
+  MEXIT($1,ifelse($2,,0,$2))
+  ST_LOG(ST_EVENT_EXIT, lockAddr)
+}')
+
+define(WAITPAUSE,
+`{
+  register int *lockAddr;
+
+  lockAddr = (int *)&($1[ifelse($2,,0,$2)].lock);
+  ST_LOG(ST_PAUSE_ENTER,lockAddr)
+  MENTER($1,ifelse($2,,0,$2))
+  if (!$1[ifelse($2,,0,$2)].flag) {
+    DELAY($1,0,ifelse($2,,0,$2))
+  }
+  CONTINUE($1,0,ifelse($2,,0,$2))
+  MEXIT($1,ifelse($2,,0,$2))
+  ST_LOG(ST_PAUSE_EXIT,lockAddr)
+}')
+
+define(PAUSE,
+`{
+  register int *lockAddr;
+  lockAddr = (int *)&($1[ifelse($2,,0,$2)].lock);
+  ST_LOG(ST_PAUSE_ENTER, lockAddr )
+  MENTER($1,ifelse($2,,0,$2))
+  if (!$1[ifelse($2,,0,$2)].flag) {
+    DELAY($1,1,ifelse($2,,0,$2))
+  }
+  $1[ifelse($2,,0,$2)].flag = 0;
+  CONTINUE($1,0,ifelse($2,,0,$2))
+  MEXIT($1,ifelse($2,,0,$2))
+  ST_LOG(ST_PAUSE_EXIT, lockAddr )
+}')
