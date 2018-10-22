@@ -30,9 +30,9 @@ If you find the program useful we would like to know about it.
 If you publish work in which you have used the CacheMire test bench
 we would like you to refer to the followin paper:
 
-M. Brorsson et al., "The CacheMire Bench - A Flexible and Effective
-Approach for Simulation of Multiprocessors", In Porceedings of the
+M. Brorsson, F. Dahlgren, H. Grahn, and P. Stenström, "The CacheMire Bench - A Flexible and Effective
+Approach for Simulation of Multiprocessors", In Proceedings of the
 26th Annual International Simulation Symposium, pp. 41-49, March 1993.
 
-The paper is included in the file cachemire.ps
+The paper is included in the file simsymp.{ps,pdf}
 
